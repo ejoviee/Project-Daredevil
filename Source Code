@@ -1,0 +1,162 @@
+// Define the pins for HC-SR04 sensor
+#define TRIG_PIN 2
+#define ECHO_PIN 3
+
+// Define the pins for OV7670 camera module
+#define VSYNC 4
+#define SIOD 5
+#define SIOC 6
+#define XCLK 7
+#define D0 8
+#define D1 9
+#define D2 10
+#define D3 11
+#define D4 12
+#define D5 A0
+#define D6 A1
+#define D7 A2
+
+// Define the pins for Bluetooth module
+#define BT_RX 13 // Connect to TX pin of Bluetooth module
+#define BT_TX A3 // Connect to RX pin of Bluetooth module
+
+// Define the pins for speaker or headphone
+#define AUDIO_PIN A4
+
+// Include the libraries for HC-SR04 sensor, OV7670 camera module and Bluetooth module
+#include <Ultrasonic.h>
+#include <ArduCAM.h>
+#include <SoftwareSerial.h>
+
+// Create an Ultrasonic object with TRIG_PIN and ECHO_PIN as parameters
+Ultrasonic ultrasonic(TRIG_PIN, ECHO_PIN);
+
+// Create an ArduCAM object with OV7670 model as parameter
+ArduCAM arducam(OV7670);
+
+// Create a SoftwareSerial object with BT_RX and BT_TX as parameters
+SoftwareSerial bluetooth(BT_RX, BT_TX);
+
+// Define some constants for OV7670 camera module settings
+const byte OV7670_reg[][2] = {
+  {0x12, 0x80},
+  {0x11, 0x01},
+  {0x3a, 0x04},
+  {0x12, 0x00},
+  {0x17, 0x13},
+  {0x18, 0x01},
+  {0x32, 0xb6},
+  {0x19, 0x02},
+  {0x1a, 0x7a},
+  {0x03, 0x0a},
+  {0x0c, 0x00},
+  {0x3e, 0x00},
+  {0x70, 0x3a},
+  {0x71, 0x35},
+  {0x72, 0x11},
+  {0x73, 0xf0},
+};
+
+// Define some variables for storing sensor data and calculations
+long distance; // Distance measured by ultrasonic sensor in cm
+int focalLength = 500; // Focal length of camera in pixels (can be adjusted)
+int realWidth = 10; // Real width of object in cm (can be adjusted)
+int imageWidth = 640; // Image width captured by camera in pixels (can be adjusted)
+float approxDistance; // Approximate distance calculated by camera in cm
+
+void setup() {
+  
+  // Initialize serial communication with baud rate of 9600 bps
+  Serial.begin(9600);
+  
+  // Initialize serial communication with Bluetooth module with baud rate of 
+9600 bps
+bluetooth.begin(9600);
+
+// Initialize ArduCAM object and check if it is ready
+arducam.InitCAM();
+if (!arducam.check_fifo_status()) {
+Serial.println("ArduCAM is ready");
+}
+else {
+Serial.println("ArduCAM is not ready");
+}
+
+// Write OV7670 camera module settings to ArduCAM object
+for (int i = 0; i < sizeof(OV7670_reg) / sizeof(OV7670_reg[1]); i++) {
+arducam.wrSensorReg8_8(OV7670_reg[i][1], OV7670_reg[i][2]);
+}
+
+}
+
+void loop() {
+
+// Measure distance using ultrasonic sensor and print it to serial monitor
+distance = ultrasonic.Ranging(CM);
+Serial.print("Distance measured by ultrasonic sensor: ");
+Serial.print(distance);
+Serial.println(" cm");
+
+// Capture an image using ArduCAM object and store it in FIFO buffer
+arducam.flush_fifo();
+arducam.clear_fifo_flag();
+arducam.start_capture();
+while (!arducam.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK));
+Serial.println("Image captured");
+
+// Read the image width from the FIFO buffer
+byte VH, VL;
+int i = 0;
+arducam.CS_LOW();
+arducam.set_fifo_burst();
+while (i < 640) {
+if (i == 0) {
+VH = arducam.read_fifo();
+VL = arducam.read_fifo();
+}
+else {
+VH = arducam.read_fifo();
+VL = arducam.read_fifo();
+if (VH == 0xff && VL == 0xd9) break;
+}
+i++;
+}
+arducam.CS_HIGH();
+
+// Calculate the approximate distance using the image width and print it to serial monitor
+approxDistance = (focalLength * realWidth) / imageWidth;
+Serial.print("Approximate distance calculated by camera: ");
+Serial.print(approxDistance);
+Serial.println(" cm");
+
+// Send a message to the Bluetooth module with the approximate distance
+bluetooth.print("Object detected at ");
+bluetooth.print(approxDistance / 100);
+bluetooth.println(" meters");
+
+// Play an audio WAV file using the speaker or headphone
+playAudio();
+
+// Wait for 1 second before repeating the loop
+delay(1000);
+
+}
+
+// Define a function to play an audio WAV file using the speaker or headphone
+void playAudio() {
+
+// The audio WAV file data is stored in an array of bytes
+byte audioData[] = {
+0x52, 0x49, 0x46, 0x46, 0x24, 0x08, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
+0x66, 0x6d, 0x74, 0x20, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+0x22, 0x56, 0x00, 0x00, 0x22, 0x56, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00,
+... // The rest of the audio data is omitted for brevity
+};
+
+// Loop through the audio data array and write each byte to the speaker or headphone pin
+for (int i = 44; i < sizeof(audioData); i++) {
+analogWrite(AUDIO_PIN, audioData[i]);
+delayMicroseconds(22); // The delay is based on the sample rate of the audio file (22050 Hz)
+}
+
+}
